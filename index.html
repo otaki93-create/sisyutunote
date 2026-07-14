@@ -421,6 +421,80 @@
     white-space: nowrap;
   }
   .en-addmulti input{ accent-color: var(--red); }
+
+  .en-formula-baserow{
+    display:flex;
+    align-items:center;
+    gap: 8px;
+    padding: 6px 0 10px;
+    border-bottom: 1px solid var(--rule);
+    margin-bottom: 6px;
+  }
+  .en-formula-label{
+    flex: 1;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--ink-soft);
+  }
+  .en-formula-base{
+    width: 100px;
+    text-align: right;
+    border: none;
+    border-bottom: 1px solid var(--gold);
+    background: transparent;
+    font-family: 'Noto Sans JP', sans-serif;
+    font-variant-numeric: tabular-nums;
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--ink);
+    padding: 3px 2px;
+    outline: none;
+  }
+  .en-formula-base:focus{ border-bottom: 1px solid var(--red); }
+  .en-adj{
+    display:flex;
+    align-items:center;
+    gap: 8px;
+    padding: 6px 0;
+    border-bottom: 1px dotted var(--rule);
+  }
+  .en-adj:last-of-type{ border-bottom: none; }
+  .en-adj-label{
+    flex: 1;
+    min-width: 0;
+    border: none;
+    border-bottom: 1px solid transparent;
+    background: transparent;
+    font-family: 'Noto Sans JP', sans-serif;
+    font-size: 13.5px;
+    color: var(--ink-soft);
+    padding: 3px 2px;
+    outline: none;
+  }
+  .en-adj-label:focus{ border-bottom: 1px solid var(--gold); color: var(--ink); }
+  .en-adj-amount{
+    width: 88px;
+    text-align: right;
+    border: none;
+    border-bottom: 1px solid transparent;
+    background: transparent;
+    font-family: 'Noto Sans JP', sans-serif;
+    font-variant-numeric: tabular-nums;
+    font-size: 14px;
+    color: var(--ink);
+    padding: 3px 2px;
+    outline: none;
+  }
+  .en-adj-amount:focus{ border-bottom: 1px solid var(--red); }
+  .en-formula-sum{
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1.5px solid var(--ink);
+    text-align: right;
+    font-weight: 700;
+    font-size: 15px;
+    font-variant-numeric: tabular-nums;
+  }
 </style>
 </head>
 <body>
@@ -436,19 +510,22 @@
   const monthKey = (d) => `expense_note:expenses:${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
 
   const DEFAULT_CATEGORIES = ['ドコモ','JCV','灯油','クレジットカード','ideco','あやねネット代','はると家賃','技師会費'];
-  const MULTI_BY_DEFAULT = new Set(['クレジットカード']);
+  const TYPE_BY_DEFAULT = { 'クレジットカード': 'multi', 'JCV': 'formula' };
+  const FORMULA_ADJUSTMENTS_DEFAULT = {
+    'JCV': [ { label: '', amount: 5702 }, { label: '', amount: -2500 } ]
+  };
 
   const app = document.getElementById('enApp');
   const loadingEl = document.getElementById('enLoading');
 
-  let categories = [];   // [{name, multi}]
-  let expenses = {};     // name -> number  OR  name -> [{id, memo, amount}] when multi
+  let categories = [];   // [{name, type: 'single'|'multi'|'formula', adjustments: [{id,label,amount}]}]
+  let expenses = {};     // name -> number (single/formula base)  OR  name -> [{id, memo, amount}] (multi)
   let currentDate = new Date();
   currentDate.setDate(1);
   let editing = false;
   let undoTimer = null;
   let lastDeleted = null;
-  const expandedCats = new Set(['クレジットカード']);
+  const expandedCats = new Set(['クレジットカード', 'JCV']);
 
   function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
   function fmtMonth(d){ return `${d.getFullYear()}年${d.getMonth()+1}月`; }
@@ -457,6 +534,8 @@
     return isNaN(n) ? 0 : n;
   }
   function fmtYen(n){ return n.toLocaleString('ja-JP'); }
+  function nextType(t){ return t === 'single' ? 'multi' : (t === 'multi' ? 'formula' : 'single'); }
+  function typeLabel(t){ return t === 'single' ? '単一入力' : (t === 'multi' ? '複数件入力' : '計算式入力'); }
 
   async function safeGet(key){
     try{
@@ -470,20 +549,39 @@
 
   function findCat(name){ return categories.find(c => c.name === name); }
 
+  function makeDefaultCategory(name){
+    const type = TYPE_BY_DEFAULT[name] || 'single';
+    const adjustments = type === 'formula'
+      ? (FORMULA_ADJUSTMENTS_DEFAULT[name] || []).map(a => ({ id: uid(), label: a.label, amount: a.amount }))
+      : [];
+    return { name, type, adjustments };
+  }
+
   async function loadCategories(){
     const raw = await safeGet(CATEGORY_KEY);
     if(raw){
       try{
         const parsed = JSON.parse(raw);
-        categories = parsed.map(c => typeof c === 'string'
-          ? { name: c, multi: MULTI_BY_DEFAULT.has(c) }
-          : { name: c.name, multi: !!c.multi }
-        );
+        categories = parsed.map(c => {
+          if(typeof c === 'string') return makeDefaultCategory(c);
+          if(c.type){
+            return {
+              name: c.name,
+              type: c.type,
+              adjustments: Array.isArray(c.adjustments)
+                ? c.adjustments.map(a => ({ id: a.id || uid(), label: a.label || '', amount: toNumber(a.amount) }))
+                : []
+            };
+          }
+          // old schema (boolean `multi`, no formula concept yet) — migrate once
+          if(c.multi === true) return { name: c.name, type: 'multi', adjustments: [] };
+          return makeDefaultCategory(c.name);
+        });
       }catch(e){
-        categories = DEFAULT_CATEGORIES.map(name => ({ name, multi: MULTI_BY_DEFAULT.has(name) }));
+        categories = DEFAULT_CATEGORIES.map(makeDefaultCategory);
       }
     }else{
-      categories = DEFAULT_CATEGORIES.map(name => ({ name, multi: MULTI_BY_DEFAULT.has(name) }));
+      categories = DEFAULT_CATEGORIES.map(makeDefaultCategory);
     }
     await saveCategories();
   }
@@ -499,7 +597,7 @@
     expenses = {};
     categories.forEach(cat => {
       const v = rawObj[cat.name];
-      if(cat.multi){
+      if(cat.type === 'multi'){
         if(Array.isArray(v)){
           expenses[cat.name] = v.map(e => ({ id: e.id || uid(), memo: e.memo || '', amount: toNumber(e.amount) }));
         }else if(typeof v === 'number' && v > 0){
@@ -508,6 +606,7 @@
           expenses[cat.name] = [];
         }
       }else{
+        // single or formula: a plain base number
         if(Array.isArray(v)){
           expenses[cat.name] = v.reduce((s,e) => s + toNumber(e.amount), 0);
         }else{
@@ -523,9 +622,14 @@
   function entryListOf(name){
     return Array.isArray(expenses[name]) ? expenses[name] : [];
   }
+  function adjustmentsSum(cat){
+    return (cat.adjustments || []).reduce((s,a) => s + toNumber(a.amount), 0);
+  }
   function categoryTotal(cat){
-    if(cat.multi) return entryListOf(cat.name).reduce((s,e) => s + toNumber(e.amount), 0);
-    return toNumber(expenses[cat.name] || 0);
+    if(cat.type === 'multi') return entryListOf(cat.name).reduce((s,e) => s + toNumber(e.amount), 0);
+    const base = toNumber(expenses[cat.name] || 0);
+    if(cat.type === 'formula') return base + adjustmentsSum(cat);
+    return base;
   }
   function computeTotal(){
     return categories.reduce((sum, cat) => sum + categoryTotal(cat), 0);
@@ -549,47 +653,81 @@
   }
   function escapeAttr(s){ return escapeHtml(s); }
 
+  function buildMultiPanel(cat){
+    const name = cat.name;
+    const entries = entryListOf(name);
+    const rows = entries.length ? entries.map(e => `
+      <div class="en-entry" data-entry-id="${escapeAttr(e.id)}">
+        <input class="en-entry-memo" data-role="entry-memo" placeholder="内容（任意）" value="${escapeAttr(e.memo || '')}">
+        <span class="en-yen">¥</span>
+        <input class="en-entry-amount" data-role="entry-amount" inputmode="numeric" value="${fmtYen(toNumber(e.amount))}">
+        <button class="en-entry-del" data-role="entry-del" aria-label="明細を削除">✕</button>
+      </div>
+    `).join('') : `<div class="en-empty" style="padding:8px 4px;">まだ明細がありません</div>`;
+
+    return `
+      <div class="en-entries">
+        ${rows}
+        <button class="en-entry-add" data-role="entry-add">＋ 明細を追加</button>
+      </div>
+    `;
+  }
+
+  function buildFormulaPanel(cat){
+    const name = cat.name;
+    const base = toNumber(expenses[name] || 0);
+    const adjustments = cat.adjustments || [];
+    const adjRows = adjustments.length ? adjustments.map(a => `
+      <div class="en-adj" data-adj-id="${escapeAttr(a.id)}">
+        <input class="en-adj-label" data-role="adj-label" placeholder="内容（任意）" value="${escapeAttr(a.label || '')}">
+        <span class="en-yen">¥</span>
+        <input class="en-adj-amount" data-role="adj-amount" inputmode="numeric" value="${fmtYen(toNumber(a.amount))}">
+        <button class="en-entry-del" data-role="adj-del" aria-label="固定額を削除">✕</button>
+      </div>
+    `).join('') : `<div class="en-empty" style="padding:8px 4px;">固定額はまだありません</div>`;
+
+    return `
+      <div class="en-entries en-formula-panel">
+        <div class="en-formula-baserow">
+          <span class="en-formula-label">入力金額</span>
+          <span class="en-yen">¥</span>
+          <input class="en-formula-base" data-role="formula-base" inputmode="numeric" value="${fmtYen(base)}">
+        </div>
+        ${adjRows}
+        <button class="en-entry-add" data-role="adj-add">＋ 固定額を追加</button>
+        <div class="en-formula-sum">合計　¥${fmtYen(categoryTotal(cat))}</div>
+      </div>
+    `;
+  }
+
   function buildRow(cat){
     const name = cat.name;
     const subtotal = categoryTotal(cat);
     const expanded = expandedCats.has(name);
 
-    let amountArea;
-    if(cat.multi){
-      const count = entryListOf(name).length;
+    let amountArea, badge = '';
+    if(cat.type === 'single'){
+      amountArea = `
+        <span class="en-yen">¥</span>
+        <input class="en-row-amount" inputmode="numeric" data-role="amount" value="${fmtYen(subtotal)}">
+      `;
+    }else{
       amountArea = `
         <span class="en-yen">¥</span>
         <span class="en-row-subtotal">${fmtYen(subtotal)}</span>
         <button class="en-row-expand" data-role="expand" aria-label="明細を開閉">${expanded ? '▲' : '▼'}</button>
       `;
-      var badge = count > 0 ? `<span class="en-badge">${count}件</span>` : `<span class="en-badge">明細なし</span>`;
-    }else{
-      amountArea = `
-        <span class="en-yen">¥</span>
-        <input class="en-row-amount" inputmode="numeric" data-role="amount" value="${fmtYen(subtotal)}">
-      `;
-      var badge = '';
+      if(cat.type === 'multi'){
+        const count = entryListOf(name).length;
+        badge = count > 0 ? `<span class="en-badge">${count}件</span>` : `<span class="en-badge">明細なし</span>`;
+      }else if(cat.type === 'formula'){
+        badge = `<span class="en-badge">計算式</span>`;
+      }
     }
 
-    let entriesPanel = '';
-    if(cat.multi && expanded){
-      const entries = entryListOf(name);
-      const rows = entries.length ? entries.map(e => `
-        <div class="en-entry" data-entry-id="${escapeAttr(e.id)}">
-          <input class="en-entry-memo" data-role="entry-memo" placeholder="内容（任意）" value="${escapeAttr(e.memo || '')}">
-          <span class="en-yen">¥</span>
-          <input class="en-entry-amount" data-role="entry-amount" inputmode="numeric" value="${fmtYen(toNumber(e.amount))}">
-          <button class="en-entry-del" data-role="entry-del" aria-label="明細を削除">✕</button>
-        </div>
-      `).join('') : `<div class="en-empty" style="padding:8px 4px;">まだ明細がありません</div>`;
-
-      entriesPanel = `
-        <div class="en-entries">
-          ${rows}
-          <button class="en-entry-add" data-role="entry-add">＋ 明細を追加</button>
-        </div>
-      `;
-    }
+    let detailPanel = '';
+    if(expanded && cat.type === 'multi') detailPanel = buildMultiPanel(cat);
+    if(expanded && cat.type === 'formula') detailPanel = buildFormulaPanel(cat);
 
     return `
       <div class="en-row" data-cat="${escapeAttr(name)}">
@@ -600,9 +738,9 @@
             <div class="en-row-amountwrap">${amountArea}</div>
           </div>
           <div class="en-row-editextra">
-            <button class="en-row-typetoggle" data-role="toggletype">${cat.multi ? '単一入力に戻す' : '複数件入力にする'}</button>
+            <button class="en-row-typetoggle" data-role="toggletype">${typeLabel(nextType(cat.type))}にする</button>
           </div>
-          ${entriesPanel}
+          ${detailPanel}
         </div>
       </div>
     `;
@@ -664,13 +802,18 @@
     const row = document.querySelector(`.en-row[data-cat="${cssEscape(name)}"]`);
     if(!row) return;
     const cat = findCat(name);
+    if(!cat) return;
     const subEl = row.querySelector('.en-row-subtotal');
-    if(subEl && cat){ subEl.textContent = fmtYen(categoryTotal(cat)); }
-    const badge = row.querySelector('.en-badge');
-    if(badge){
-      const count = entryListOf(name).length;
-      badge.textContent = count > 0 ? `${count}件` : '明細なし';
+    if(subEl){ subEl.textContent = fmtYen(categoryTotal(cat)); }
+    if(cat.type === 'multi'){
+      const badge = row.querySelector('.en-badge');
+      if(badge){
+        const count = entryListOf(name).length;
+        badge.textContent = count > 0 ? `${count}件` : '明細なし';
+      }
     }
+    const sumEl = row.querySelector('.en-formula-sum');
+    if(sumEl){ sumEl.textContent = `合計　¥${fmtYen(categoryTotal(cat))}`; }
   }
 
   function cssEscape(s){
@@ -694,7 +837,8 @@
       return;
     }
     const multi = !!(multiCheckbox && multiCheckbox.checked);
-    categories.push({ name, multi });
+    const type = multi ? 'multi' : 'single';
+    categories.push({ name, type, adjustments: [] });
     expenses[name] = multi ? [] : 0;
     if(multi) expandedCats.add(name);
     await saveCategories();
@@ -707,7 +851,7 @@
   async function deleteCategory(name){
     const idx = categories.findIndex(c => c.name === name);
     if(idx === -1) return;
-    lastDeleted = { name, index: idx, multi: categories[idx].multi, value: expenses[name] };
+    lastDeleted = { name, index: idx, type: categories[idx].type, adjustments: categories[idx].adjustments, value: expenses[name] };
     categories.splice(idx, 1);
     await saveCategories();
     render();
@@ -732,9 +876,9 @@
 
   async function undoDelete(){
     if(!lastDeleted) return;
-    const { name, index, multi, value } = lastDeleted;
+    const { name, index, type, adjustments, value } = lastDeleted;
     if(!findCat(name)){
-      categories.splice(Math.min(index, categories.length), 0, { name, multi });
+      categories.splice(Math.min(index, categories.length), 0, { name, type, adjustments: adjustments || [] });
       expenses[name] = value;
       await saveCategories();
       await saveExpenses();
@@ -748,16 +892,22 @@
   async function toggleCategoryType(name){
     const cat = findCat(name);
     if(!cat) return;
-    if(cat.multi){
+    if(cat.type === 'single'){
+      const amt = toNumber(expenses[name] || 0);
+      cat.type = 'multi';
+      expenses[name] = amt > 0 ? [{ id: uid(), memo: '', amount: amt }] : [];
+    }else if(cat.type === 'multi'){
       const sum = entryListOf(name).reduce((s,e) => s + toNumber(e.amount), 0);
-      cat.multi = false;
+      cat.type = 'formula';
+      if(!Array.isArray(cat.adjustments)) cat.adjustments = [];
       expenses[name] = sum;
     }else{
-      const amt = toNumber(expenses[name] || 0);
-      cat.multi = true;
-      expenses[name] = amt > 0 ? [{ id: uid(), memo: '', amount: amt }] : [];
-      expandedCats.add(name);
+      // formula -> single: carry over the computed total so the money value doesn't silently change
+      const total = categoryTotal(cat);
+      cat.type = 'single';
+      expenses[name] = total;
     }
+    if(cat.type !== 'single') expandedCats.add(name);
     await saveCategories();
     await saveExpenses();
     render();
@@ -780,6 +930,29 @@
     if(!Array.isArray(expenses[name])) return;
     expenses[name] = expenses[name].filter(e => e.id !== id);
     await saveExpenses();
+    render();
+  }
+
+  async function addAdjustment(name){
+    const cat = findCat(name);
+    if(!cat) return;
+    if(!Array.isArray(cat.adjustments)) cat.adjustments = [];
+    cat.adjustments.push({ id: uid(), label: '', amount: 0 });
+    expandedCats.add(name);
+    await saveCategories();
+    render();
+    const row = document.querySelector(`.en-row[data-cat="${cssEscape(name)}"]`);
+    if(row){
+      const lastAmt = row.querySelectorAll('[data-role="adj-amount"]');
+      if(lastAmt.length) lastAmt[lastAmt.length - 1].focus();
+    }
+  }
+
+  async function deleteAdjustment(name, id){
+    const cat = findCat(name);
+    if(!cat || !Array.isArray(cat.adjustments)) return;
+    cat.adjustments = cat.adjustments.filter(a => a.id !== id);
+    await saveCategories();
     render();
   }
 
@@ -828,6 +1001,21 @@
       return;
     }
 
+    const adjAddBtn = t.closest('[data-role="adj-add"]');
+    if(adjAddBtn){
+      const name = adjAddBtn.closest('.en-row').dataset.cat;
+      addAdjustment(name);
+      return;
+    }
+
+    const adjDelBtn = t.closest('[data-role="adj-del"]');
+    if(adjDelBtn){
+      const name = adjDelBtn.closest('.en-row').dataset.cat;
+      const id = adjDelBtn.closest('.en-adj').dataset.adjId;
+      deleteAdjustment(name, id);
+      return;
+    }
+
     if(t.id === 'enAddBtn'){ addCategoryFromInput(); return; }
   });
 
@@ -837,7 +1025,7 @@
 
   app.addEventListener('focus', (e) => {
     const t = e.target;
-    if(t.matches && t.matches('[data-role="amount"], [data-role="entry-amount"]')){
+    if(t.matches && t.matches('[data-role="amount"], [data-role="entry-amount"], [data-role="formula-base"], [data-role="adj-amount"]')){
       t.value = String(toNumber(t.value) || '');
     }
   }, true);
@@ -851,6 +1039,17 @@
       const val = toNumber(t.value);
       expenses[name] = val;
       t.value = fmtYen(val);
+      updateTotalDisplay();
+      await saveExpenses();
+      return;
+    }
+
+    if(t.matches('[data-role="formula-base"]')){
+      const name = t.closest('.en-row').dataset.cat;
+      const val = toNumber(t.value);
+      expenses[name] = val;
+      t.value = fmtYen(val);
+      updateRowSubtotal(name);
       updateTotalDisplay();
       await saveExpenses();
       return;
@@ -880,11 +1079,43 @@
       }
       return;
     }
+
+    if(t.matches('[data-role="adj-amount"]')){
+      const name = t.closest('.en-row').dataset.cat;
+      const id = t.closest('.en-adj').dataset.adjId;
+      const cat = findCat(name);
+      const adj = cat && (cat.adjustments || []).find(a => a.id === id);
+      if(adj){
+        adj.amount = toNumber(t.value);
+        t.value = fmtYen(adj.amount);
+        updateRowSubtotal(name);
+        updateTotalDisplay();
+        await saveCategories();
+      }
+      return;
+    }
+
+    if(t.matches('[data-role="adj-label"]')){
+      const name = t.closest('.en-row').dataset.cat;
+      const id = t.closest('.en-adj').dataset.adjId;
+      const cat = findCat(name);
+      const adj = cat && (cat.adjustments || []).find(a => a.id === id);
+      if(adj){
+        adj.label = t.value.trim();
+        await saveCategories();
+      }
+      return;
+    }
   }, true);
 
   app.addEventListener('input', (e) => {
     const t = e.target;
-    if(t.matches && (t.matches('[data-role="amount"]') || t.matches('[data-role="entry-amount"]'))){
+    if(t.matches && (
+      t.matches('[data-role="amount"]') ||
+      t.matches('[data-role="entry-amount"]') ||
+      t.matches('[data-role="formula-base"]') ||
+      t.matches('[data-role="adj-amount"]')
+    )){
       updateTotalDisplay();
     }
   });
