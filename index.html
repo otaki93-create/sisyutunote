@@ -631,8 +631,15 @@
     if(cat.type === 'formula') return base + adjustmentsSum(cat);
     return base;
   }
+  // What a category contributes to the grand total ("残"). For formula-type
+  // categories (e.g. JCV), only the raw input amount counts — the fixed
+  // adjustments are shown in the row/detail panel but excluded from 残.
+  function grandTotalContribution(cat){
+    if(cat.type === 'formula') return toNumber(expenses[cat.name] || 0);
+    return categoryTotal(cat);
+  }
   function computeTotal(){
-    return categories.reduce((sum, cat) => sum + categoryTotal(cat), 0);
+    return categories.reduce((sum, cat) => sum + grandTotalContribution(cat), 0);
   }
 
   function buildSpine(){
@@ -792,8 +799,26 @@
 
   function updateTotalDisplay(){
     let sum = 0;
-    document.querySelectorAll('[data-role="amount"]').forEach(input => { sum += toNumber(input.value); });
-    document.querySelectorAll('.en-row-subtotal').forEach(el => { sum += toNumber(el.textContent); });
+    categories.forEach(cat => {
+      const row = document.querySelector(`.en-row[data-cat="${cssEscape(cat.name)}"]`);
+      if(cat.type === 'single'){
+        const input = row && row.querySelector('[data-role="amount"]');
+        sum += input ? toNumber(input.value) : grandTotalContribution(cat);
+      }else if(cat.type === 'multi'){
+        const entryInputs = row ? row.querySelectorAll('[data-role="entry-amount"]') : [];
+        if(entryInputs.length){
+          let s = 0;
+          entryInputs.forEach(i => { s += toNumber(i.value); });
+          sum += s;
+        }else{
+          sum += grandTotalContribution(cat);
+        }
+      }else if(cat.type === 'formula'){
+        // Only the raw input amount counts toward 残 — fixed adjustments are excluded.
+        const baseInput = row && row.querySelector('[data-role="formula-base"]');
+        sum += baseInput ? toNumber(baseInput.value) : grandTotalContribution(cat);
+      }
+    });
     const amountEl = document.querySelector('.en-total-amount');
     if(amountEl){ amountEl.innerHTML = `<span class="en-total-yen">¥</span>${fmtYen(sum)}`; }
   }
