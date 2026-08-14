@@ -586,7 +586,7 @@
 
     // One-time migration for existing users: insert the new 車ローン category
     // right after はると家賃 if it isn't already present.
-    const carLoanName = '車ローン（25日以降）';
+    const carLoanName = '車ローン（25日以内）';
     if(!findCat(carLoanName)){
       const idx = categories.findIndex(c => c.name === 'はると家賃');
       const newCat = makeDefaultCategory(carLoanName);
