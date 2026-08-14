@@ -509,7 +509,7 @@
   const CATEGORY_KEY = 'expense_note:categories';
   const monthKey = (d) => `expense_note:expenses:${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
 
-  const DEFAULT_CATEGORIES = ['ドコモ','JCV','灯油','クレジットカード','ideco','あやねネット代','はると家賃','車ローン（25日以内）','技師会費'];
+  const DEFAULT_CATEGORIES = ['ドコモ','JCV','灯油','クレジットカード','ideco','あやねネット代','はると家賃','車ローン（25日以降）','技師会費'];
   const TYPE_BY_DEFAULT = { 'クレジットカード': 'multi', 'JCV': 'formula' };
   const FORMULA_ADJUSTMENTS_DEFAULT = {
     'JCV': [ { label: '', amount: 5702 }, { label: '', amount: -2500 } ]
@@ -586,7 +586,7 @@
 
     // One-time migration for existing users: insert the new 車ローン category
     // right after はると家賃 if it isn't already present.
-    const carLoanName = '車ローン（25日以内）';
+    const carLoanName = '車ローン（25日以降）';
     if(!findCat(carLoanName)){
       const idx = categories.findIndex(c => c.name === 'はると家賃');
       const newCat = makeDefaultCategory(carLoanName);
