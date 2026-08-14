@@ -509,7 +509,7 @@
   const CATEGORY_KEY = 'expense_note:categories';
   const monthKey = (d) => `expense_note:expenses:${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
 
-  const DEFAULT_CATEGORIES = ['ドコモ','JCV','灯油','クレジットカード','ideco','あやねネット代','はると家賃','車ローン（25日以降）','技師会費'];
+  const DEFAULT_CATEGORIES = ['ドコモ','JCV','灯油','クレジットカード','ideco','あやねネット代','はると家賃','車ローン（25日以内）','技師会費'];
   const TYPE_BY_DEFAULT = { 'クレジットカード': 'multi', 'JCV': 'formula' };
   const FORMULA_ADJUSTMENTS_DEFAULT = {
     'JCV': [ { label: '', amount: 5702 }, { label: '', amount: -2500 } ]
@@ -584,12 +584,23 @@
       categories = DEFAULT_CATEGORIES.map(makeDefaultCategory);
     }
 
-    // One-time migration for existing users: insert the new 車ローン category
-    // right after はると家賃 if it isn't already present.
-    const carLoanName = '車ローン（25日以降）';
-    if(!findCat(carLoanName)){
+    // One-time migration for existing users: ensure the car-loan category
+    // exists as 車ローン（25日以内）. Some users may have ended up with both
+    // the originally auto-added 車ローン（25日以降） and a manually-created
+    // 車ローン（25日以内） — in that case, drop the duplicate 以降 entry and
+    // keep the one the user made themselves. If only 以降 exists, rename it
+    // in place (keeping its type/adjustments/history intact).
+    const carLoanOldName = '車ローン（25日以降）';
+    const carLoanNewName = '車ローン（25日以内）';
+    const hasOld = findCat(carLoanOldName);
+    const hasNew = findCat(carLoanNewName);
+    if(hasOld && hasNew){
+      categories = categories.filter(c => c.name !== carLoanOldName);
+    }else if(hasOld && !hasNew){
+      hasOld.name = carLoanNewName;
+    }else if(!hasOld && !hasNew){
       const idx = categories.findIndex(c => c.name === 'はると家賃');
-      const newCat = makeDefaultCategory(carLoanName);
+      const newCat = makeDefaultCategory(carLoanNewName);
       if(idx !== -1) categories.splice(idx + 1, 0, newCat);
       else categories.push(newCat);
     }
@@ -606,8 +617,12 @@
     if(raw){ try{ rawObj = JSON.parse(raw); }catch(e){ rawObj = {}; } }
 
     expenses = {};
+    const LEGACY_NAME_FALLBACK = { '車ローン（25日以内）': '車ローン（25日以降）' };
     categories.forEach(cat => {
-      const v = rawObj[cat.name];
+      let v = rawObj[cat.name];
+      if(v === undefined && LEGACY_NAME_FALLBACK[cat.name] !== undefined){
+        v = rawObj[LEGACY_NAME_FALLBACK[cat.name]];
+      }
       if(cat.type === 'multi'){
         if(Array.isArray(v)){
           expenses[cat.name] = v.map(e => ({ id: e.id || uid(), memo: e.memo || '', amount: toNumber(e.amount) }));
