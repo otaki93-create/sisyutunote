@@ -509,7 +509,7 @@
   const CATEGORY_KEY = 'expense_note:categories';
   const monthKey = (d) => `expense_note:expenses:${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
 
-  const DEFAULT_CATEGORIES = ['ドコモ','JCV','灯油','クレジットカード','ideco','あやねネット代','はると家賃','車ローン（25日以降）','技師会費'];
+  const DEFAULT_CATEGORIES = ['ドコモ','JCV','灯油','クレジットカード','ideco','あやねネット代','はると家賃','車ローン（25日以内）','技師会費'];
   const TYPE_BY_DEFAULT = { 'クレジットカード': 'multi', 'JCV': 'formula' };
   const FORMULA_ADJUSTMENTS_DEFAULT = {
     'JCV': [ { label: '', amount: 5702 }, { label: '', amount: -2500 } ]
