@@ -605,6 +605,24 @@
       else categories.push(newCat);
     }
 
+    // One-time repair for existing users: some iPhone users lost the −2,500円
+    // (and/or +5,702円) fixed adjustment line under JCV, likely from an
+    // accidental tap on the delete button. Restore whichever fixed amount is
+    // missing, without touching the entered base amount or anything else.
+    const JCV_FIX_FLAG = 'expense_note:jcv_fix_v1';
+    const jcvAlreadyFixed = await safeGet(JCV_FIX_FLAG);
+    if(!jcvAlreadyFixed){
+      const jcv = findCat('JCV');
+      if(jcv && jcv.type === 'formula'){
+        if(!Array.isArray(jcv.adjustments)) jcv.adjustments = [];
+        const has5702 = jcv.adjustments.some(a => toNumber(a.amount) === 5702);
+        const hasMinus2500 = jcv.adjustments.some(a => toNumber(a.amount) === -2500);
+        if(!has5702) jcv.adjustments.push({ id: uid(), label: '', amount: 5702 });
+        if(!hasMinus2500) jcv.adjustments.push({ id: uid(), label: '', amount: -2500 });
+      }
+      await safeSet(JCV_FIX_FLAG, '1');
+    }
+
     await saveCategories();
   }
   async function saveCategories(){
